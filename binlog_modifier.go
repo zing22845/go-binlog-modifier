@@ -22,18 +22,20 @@ func (bm *BinlogModifier) InitOnEventFunc(isCheckForeignKey bool) {
 	bm.OnEventFunc = func(event *replication.BinlogEvent) error {
 		switch e := event.Event.(type) {
 		case *replication.QueryEvent:
-			if !isCheckForeignKey {
-				if e.StatusVars[0] == Q_FLAGS2_CODE {
-					idx := bytes.Index(event.RawData, e.StatusVars)
-					// modify FK check flag
-					flags2 := binary.LittleEndian.Uint32(e.StatusVars[1:])
+			if e.StatusVars[0] == Q_FLAGS2_CODE {
+				idx := bytes.Index(event.RawData, e.StatusVars)
+				// modify FK check flag
+				flags2 := binary.LittleEndian.Uint32(e.StatusVars[1:])
+				if !isCheckForeignKey {
 					flags2 |= OPTION_NO_FOREIGN_KEY_CHECKS
-					binary.LittleEndian.PutUint32(event.RawData[idx+1:], flags2)
-					// modify checksum
-					length := len(event.RawData)
-					checksum := crc32.ChecksumIEEE(event.RawData[:length-replication.BinlogChecksumLength])
-					binary.LittleEndian.PutUint32(event.RawData[length-replication.BinlogChecksumLength:], checksum)
+				} else {
+					flags2 &= ^OPTION_NO_FOREIGN_KEY_CHECKS
 				}
+				binary.LittleEndian.PutUint32(event.RawData[idx+1:], flags2)
+				// modify checksum
+				length := len(event.RawData)
+				checksum := crc32.ChecksumIEEE(event.RawData[:length-replication.BinlogChecksumLength])
+				binary.LittleEndian.PutUint32(event.RawData[length-replication.BinlogChecksumLength:], checksum)
 			}
 		default:
 		}
