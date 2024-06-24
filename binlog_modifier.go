@@ -20,15 +20,13 @@ type BinlogModifier struct {
 
 func (bm *BinlogModifier) InitOnEventFunc(isCheckForeignKey bool) {
 	bm.OnEventFunc = func(event *replication.BinlogEvent) error {
-		switch event.Event.(type) {
-		case *replication.FormatDescriptionEvent:
+		switch e := event.Event.(type) {
 		case *replication.QueryEvent:
 			if !isCheckForeignKey {
-				qe := event.Event.(*replication.QueryEvent)
-				if qe.StatusVars[0] == Q_FLAGS2_CODE {
-					idx := bytes.Index(event.RawData, qe.StatusVars)
+				if e.StatusVars[0] == Q_FLAGS2_CODE {
+					idx := bytes.Index(event.RawData, e.StatusVars)
 					// modify FK check flag
-					flags2 := binary.LittleEndian.Uint32(qe.StatusVars[1:])
+					flags2 := binary.LittleEndian.Uint32(e.StatusVars[1:])
 					flags2 |= OPTION_NO_FOREIGN_KEY_CHECKS
 					binary.LittleEndian.PutUint32(event.RawData[idx+1:], flags2)
 					// modify checksum
