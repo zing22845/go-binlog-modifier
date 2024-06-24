@@ -60,13 +60,5 @@ func (bm *BinlogModifier) Run() (err error) {
 	if err != nil {
 		return err
 	}
-	// copy format description event
-	isEOF, err := parser.ParseSingleEvent(bm.Reader, bm.OnEventFunc)
-	if err != nil {
-		return err
-	}
-	if isEOF {
-		return nil
-	}
 	return parser.ParseReader(bm.Reader, bm.OnEventFunc)
 }
