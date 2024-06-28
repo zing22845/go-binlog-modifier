@@ -16,6 +16,7 @@ type BinlogModifier struct {
 	IsModifyPosition bool
 	DeltaPosition    int64
 	OnEventFunc      func(event *replication.BinlogEvent) error
+	WriteSize        int64
 }
 
 func (bm *BinlogModifier) InitOnEventFunc(isCheckForeignKey bool) {
@@ -39,8 +40,12 @@ func (bm *BinlogModifier) InitOnEventFunc(isCheckForeignKey bool) {
 			}
 		default:
 		}
-		_, err := bm.WriterAt.WriteAt(event.RawData, int64(event.Header.LogPos-event.Header.EventSize))
-		return err
+		n, err := bm.WriterAt.WriteAt(event.RawData, int64(event.Header.LogPos-event.Header.EventSize))
+		if err != nil {
+			return err
+		}
+		bm.WriteSize += int64(n)
+		return nil
 	}
 	bm.IsModifyPosition = false
 	bm.DeltaPosition = 0
@@ -58,9 +63,10 @@ func (bm *BinlogModifier) Run() (err error) {
 		return fmt.Errorf("invalid binlog file header, expect %v but got %v", replication.BinLogFileHeader, fh)
 	}
 	// write file header
-	_, err = bm.WriterAt.WriteAt(fh, 0)
+	n, err := bm.WriterAt.WriteAt(fh, 0)
 	if err != nil {
 		return err
 	}
+	bm.WriteSize += int64(n)
 	return parser.ParseReader(bm.Reader, bm.OnEventFunc)
 }
