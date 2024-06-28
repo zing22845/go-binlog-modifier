@@ -11,14 +11,16 @@ import (
 )
 
 type BinlogModifier struct {
-	Reader           io.Reader // must read from the header of a binlog file
-	WriterAt         io.WriterAt
-	IsVerifyChecksum bool
-	IsModifyPosition bool
-	DeltaPosition    int64
-	OnEventFunc      func(event *replication.BinlogEvent) error
-	WriteSize        int64
-	format           *replication.FormatDescriptionEvent
+	Reader               io.Reader // must read from the header of a binlog file
+	WriterAt             io.WriterAt
+	IsVerifyChecksum     bool
+	IsModifyPosition     bool
+	DeltaPosition        int64
+	OnEventFunc          func(event *replication.BinlogEvent) error
+	WriteSize            int64
+	format               *replication.FormatDescriptionEvent
+	tableIDSize          int
+	rowsEventFlagsOffset int
 }
 
 func (bm *BinlogModifier) DisableForeignKeyChecks() {
@@ -26,6 +28,11 @@ func (bm *BinlogModifier) DisableForeignKeyChecks() {
 		switch e := event.Event.(type) {
 		case *replication.FormatDescriptionEvent:
 			bm.format = e
+			bm.tableIDSize = 6
+			if bm.format.EventTypeHeaderLengths[replication.TABLE_MAP_EVENT-1] == 6 {
+				bm.tableIDSize = 4
+			}
+			bm.rowsEventFlagsOffset = replication.EventHeaderSize + bm.tableIDSize
 		case *replication.QueryEvent:
 			if e.StatusVars[0] == Q_FLAGS2_CODE {
 				// modify FK check flag
@@ -37,22 +44,13 @@ func (bm *BinlogModifier) DisableForeignKeyChecks() {
 			}
 		case *replication.TableMapEvent:
 			e.Flags |= TM_REFERRED_FK_DB_F
-			tableIDSize := 6
-			if bm.format.EventTypeHeaderLengths[replication.TABLE_MAP_EVENT-1] == 6 {
-				tableIDSize = 4
-			}
-			idx := replication.EventHeaderSize + tableIDSize
-			binary.LittleEndian.PutUint16(event.RawData[idx:], e.Flags)
+
+			binary.LittleEndian.PutUint16(event.RawData[bm.rowsEventFlagsOffset:], e.Flags)
 			// modify checksum
 			ModifyChecksum(event)
 		case *replication.RowsEvent:
 			e.Flags |= TM_REFERRED_FK_DB_F
-			tableIDSize := 6
-			if bm.format.EventTypeHeaderLengths[replication.TABLE_MAP_EVENT-1] == 6 {
-				tableIDSize = 4
-			}
-			idx := replication.EventHeaderSize + tableIDSize
-			binary.LittleEndian.PutUint16(event.RawData[idx:], e.Flags)
+			binary.LittleEndian.PutUint16(event.RawData[bm.rowsEventFlagsOffset:], e.Flags)
 			// modify checksum
 			ModifyChecksum(event)
 		default:
