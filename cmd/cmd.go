@@ -15,8 +15,9 @@ func main() {
 	// 创建 OnEventFunc
 	// 创建 BinlogModifier
 	bm := &binlog_modifier.BinlogModifier{
-		Reader:   rf,
-		WriterAt: f,
+		Reader:           rf,
+		WriterAt:         f,
+		IsVerifyChecksum: true,
 	}
 	bm.InitOnEventFunc(false)
 
