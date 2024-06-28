@@ -13,6 +13,7 @@ import (
 type BinlogModifier struct {
 	Reader           io.Reader // must read from the header of a binlog file
 	WriterAt         io.WriterAt
+	IsVerifyChecksum bool
 	IsModifyPosition bool
 	DeltaPosition    int64
 	OnEventFunc      func(event *replication.BinlogEvent) error
@@ -53,6 +54,7 @@ func (bm *BinlogModifier) InitOnEventFunc(isCheckForeignKey bool) {
 
 func (bm *BinlogModifier) Run() (err error) {
 	parser := replication.NewBinlogParser()
+	parser.SetVerifyChecksum(bm.IsVerifyChecksum)
 	// read file header
 	fh := make([]byte, 4)
 	_, err = bm.Reader.Read(fh)
