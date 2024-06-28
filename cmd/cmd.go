@@ -19,7 +19,7 @@ func main() {
 		WriterAt:         f,
 		IsVerifyChecksum: true,
 	}
-	bm.InitOnEventFunc(false)
+	bm.DisableForeignKeyChecks()
 
 	err := bm.Run()
 	if err != nil {

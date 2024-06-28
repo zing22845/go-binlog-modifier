@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
-	"os"
 
 	"github.com/go-mysql-org/go-mysql/replication"
 )
@@ -22,13 +21,7 @@ type BinlogModifier struct {
 	format           *replication.FormatDescriptionEvent
 }
 
-func ModifyChecksum(event *replication.BinlogEvent) {
-	length := len(event.RawData)
-	checksum := crc32.ChecksumIEEE(event.RawData[:length-replication.BinlogChecksumLength])
-	binary.LittleEndian.PutUint32(event.RawData[length-replication.BinlogChecksumLength:], checksum)
-}
-
-func (bm *BinlogModifier) InitOnEventFunc(isCheckForeignKey bool) {
+func (bm *BinlogModifier) DisableForeignKeyChecks() {
 	bm.OnEventFunc = func(event *replication.BinlogEvent) error {
 		switch e := event.Event.(type) {
 		case *replication.FormatDescriptionEvent:
@@ -37,22 +30,13 @@ func (bm *BinlogModifier) InitOnEventFunc(isCheckForeignKey bool) {
 			if e.StatusVars[0] == Q_FLAGS2_CODE {
 				// modify FK check flag
 				flags2 := binary.LittleEndian.Uint32(e.StatusVars[1:])
-				if !isCheckForeignKey {
-					flags2 |= OPTION_NO_FOREIGN_KEY_CHECKS
-				} else {
-					flags2 &= ^OPTION_NO_FOREIGN_KEY_CHECKS
-				}
+				flags2 |= OPTION_NO_FOREIGN_KEY_CHECKS
 				binary.LittleEndian.PutUint32(event.RawData[QUERY_EVENT_STATUS_VARS_FIX_OFFSET+1:], flags2)
 				// modify checksum
 				ModifyChecksum(event)
 			}
 		case *replication.TableMapEvent:
-			e.Dump(os.Stdout)
-			if isCheckForeignKey {
-				e.Flags |= TM_REFERRED_FK_DB_F
-			} else {
-				e.Flags &= ^TM_REFERRED_FK_DB_F
-			}
+			e.Flags |= TM_REFERRED_FK_DB_F
 			tableIDSize := 6
 			if bm.format.EventTypeHeaderLengths[replication.TABLE_MAP_EVENT-1] == 6 {
 				tableIDSize = 4
@@ -61,14 +45,8 @@ func (bm *BinlogModifier) InitOnEventFunc(isCheckForeignKey bool) {
 			binary.LittleEndian.PutUint16(event.RawData[idx:], e.Flags)
 			// modify checksum
 			ModifyChecksum(event)
-			e.Dump(os.Stdout)
 		case *replication.RowsEvent:
-			e.Dump(os.Stdout)
-			if isCheckForeignKey {
-				e.Flags |= TM_REFERRED_FK_DB_F
-			} else {
-				e.Flags &= ^TM_REFERRED_FK_DB_F
-			}
+			e.Flags |= TM_REFERRED_FK_DB_F
 			tableIDSize := 6
 			if bm.format.EventTypeHeaderLengths[replication.TABLE_MAP_EVENT-1] == 6 {
 				tableIDSize = 4
@@ -77,7 +55,6 @@ func (bm *BinlogModifier) InitOnEventFunc(isCheckForeignKey bool) {
 			binary.LittleEndian.PutUint16(event.RawData[idx:], e.Flags)
 			// modify checksum
 			ModifyChecksum(event)
-			e.Dump(os.Stdout)
 		default:
 		}
 		n, err := bm.WriterAt.WriteAt(event.RawData, int64(event.Header.LogPos-event.Header.EventSize))
@@ -94,6 +71,8 @@ func (bm *BinlogModifier) InitOnEventFunc(isCheckForeignKey bool) {
 func (bm *BinlogModifier) Run() (err error) {
 	parser := replication.NewBinlogParser()
 	parser.SetVerifyChecksum(bm.IsVerifyChecksum)
+	parser.SetRowsEventDecodeFunc(SkipRowsEventDecodeBody)
+	parser.SetTableMapOptionalMetaDecodeFunc(SkipTableMapOptionalMetaDecode)
 	// read file header
 	fh := make([]byte, 4)
 	_, err = bm.Reader.Read(fh)
@@ -110,4 +89,19 @@ func (bm *BinlogModifier) Run() (err error) {
 	}
 	bm.WriteSize += int64(n)
 	return parser.ParseReader(bm.Reader, bm.OnEventFunc)
+}
+
+func ModifyChecksum(event *replication.BinlogEvent) {
+	length := len(event.RawData)
+	checksum := crc32.ChecksumIEEE(event.RawData[:length-replication.BinlogChecksumLength])
+	binary.LittleEndian.PutUint32(event.RawData[length-replication.BinlogChecksumLength:], checksum)
+}
+
+func SkipRowsEventDecodeBody(re *replication.RowsEvent, date []byte) (err error) {
+	_, err = re.DecodeHeader(date)
+	return err
+}
+
+func SkipTableMapOptionalMetaDecode([]byte) error {
+	return nil
 }
