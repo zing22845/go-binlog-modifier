@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"os"
 
 	"github.com/go-mysql-org/go-mysql/replication"
 )
@@ -46,6 +47,7 @@ func (bm *BinlogModifier) InitOnEventFunc(isCheckForeignKey bool) {
 				ModifyChecksum(event)
 			}
 		case *replication.TableMapEvent:
+			e.Dump(os.Stdout)
 			if isCheckForeignKey {
 				e.Flags |= TM_REFERRED_FK_DB_F
 			} else {
@@ -57,7 +59,25 @@ func (bm *BinlogModifier) InitOnEventFunc(isCheckForeignKey bool) {
 			}
 			idx := replication.EventHeaderSize + tableIDSize
 			binary.LittleEndian.PutUint16(event.RawData[idx:], e.Flags)
+			// modify checksum
 			ModifyChecksum(event)
+			e.Dump(os.Stdout)
+		case *replication.RowsEvent:
+			e.Dump(os.Stdout)
+			if isCheckForeignKey {
+				e.Flags |= TM_REFERRED_FK_DB_F
+			} else {
+				e.Flags &= ^TM_REFERRED_FK_DB_F
+			}
+			tableIDSize := 6
+			if bm.format.EventTypeHeaderLengths[replication.TABLE_MAP_EVENT-1] == 6 {
+				tableIDSize = 4
+			}
+			idx := replication.EventHeaderSize + tableIDSize
+			binary.LittleEndian.PutUint16(event.RawData[idx:], e.Flags)
+			// modify checksum
+			ModifyChecksum(event)
+			e.Dump(os.Stdout)
 		default:
 		}
 		n, err := bm.WriterAt.WriteAt(event.RawData, int64(event.Header.LogPos-event.Header.EventSize))
