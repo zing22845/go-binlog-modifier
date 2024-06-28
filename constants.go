@@ -1,6 +1,12 @@
 package binlog_modifier
 
-const OPTION_NO_FOREIGN_KEY_CHECKS uint32 = 1 << 26
+import "github.com/go-mysql-org/go-mysql/replication"
+
+const (
+	OPTION_NO_FOREIGN_KEY_CHECKS       uint32 = 1 << 26
+	TM_REFERRED_FK_DB_F                uint16 = 1 << 1
+	QUERY_EVENT_STATUS_VARS_FIX_OFFSET        = replication.EventHeaderSize + 13
+)
 
 const (
 	Q_FLAGS2_CODE = iota
