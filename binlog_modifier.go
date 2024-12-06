@@ -14,6 +14,7 @@ type BinlogModifier struct {
 	Reader               io.Reader // must read from the header of a binlog file
 	WriterAt             io.WriterAt
 	IsVerifyChecksum     bool
+	ChecksumAlgorithm    byte
 	IsModifyPosition     bool
 	DeltaPosition        int64
 	OnEventFunc          func(event *replication.BinlogEvent) error
@@ -21,7 +22,6 @@ type BinlogModifier struct {
 	format               *replication.FormatDescriptionEvent
 	tableIDSize          int
 	rowsEventFlagsOffset int
-	isModifyChecksum     bool
 }
 
 func (bm *BinlogModifier) DisableForeignKeyChecks() {
@@ -33,11 +33,7 @@ func (bm *BinlogModifier) DisableForeignKeyChecks() {
 			if bm.format.EventTypeHeaderLengths[replication.TABLE_MAP_EVENT-1] == 6 {
 				bm.tableIDSize = 4
 			}
-			if e.ChecksumAlgorithm == 1 {
-				bm.isModifyChecksum = true
-			} else {
-				bm.isModifyChecksum = false
-			}
+			bm.ChecksumAlgorithm = e.ChecksumAlgorithm
 			bm.rowsEventFlagsOffset = replication.EventHeaderSize + bm.tableIDSize
 		case *replication.QueryEvent:
 			if e.StatusVars[0] == Q_FLAGS2_CODE {
@@ -96,12 +92,11 @@ func (bm *BinlogModifier) Run() (err error) {
 }
 
 func (bm *BinlogModifier) ModifyChecksum(event *replication.BinlogEvent) {
-	if !bm.isModifyChecksum {
-		return
+	if bm.ChecksumAlgorithm == 1 {
+		length := len(event.RawData)
+		checksum := crc32.ChecksumIEEE(event.RawData[:length-replication.BinlogChecksumLength])
+		binary.LittleEndian.PutUint32(event.RawData[length-replication.BinlogChecksumLength:], checksum)
 	}
-	length := len(event.RawData)
-	checksum := crc32.ChecksumIEEE(event.RawData[:length-replication.BinlogChecksumLength])
-	binary.LittleEndian.PutUint32(event.RawData[length-replication.BinlogChecksumLength:], checksum)
 }
 
 func SkipRowsEventDecodeBody(re *replication.RowsEvent, date []byte) (err error) {
