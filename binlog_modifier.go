@@ -21,6 +21,7 @@ type BinlogModifier struct {
 	format               *replication.FormatDescriptionEvent
 	tableIDSize          int
 	rowsEventFlagsOffset int
+	isModifyChecksum     bool
 }
 
 func (bm *BinlogModifier) DisableForeignKeyChecks() {
@@ -32,6 +33,11 @@ func (bm *BinlogModifier) DisableForeignKeyChecks() {
 			if bm.format.EventTypeHeaderLengths[replication.TABLE_MAP_EVENT-1] == 6 {
 				bm.tableIDSize = 4
 			}
+			if e.ChecksumAlgorithm == 1 {
+				bm.isModifyChecksum = true
+			} else {
+				bm.isModifyChecksum = false
+			}
 			bm.rowsEventFlagsOffset = replication.EventHeaderSize + bm.tableIDSize
 		case *replication.QueryEvent:
 			if e.StatusVars[0] == Q_FLAGS2_CODE {
@@ -40,19 +46,19 @@ func (bm *BinlogModifier) DisableForeignKeyChecks() {
 				flags2 |= OPTION_NO_FOREIGN_KEY_CHECKS
 				binary.LittleEndian.PutUint32(event.RawData[QUERY_EVENT_STATUS_VARS_FIX_OFFSET+1:], flags2)
 				// modify checksum
-				ModifyChecksum(event)
+				bm.ModifyChecksum(event)
 			}
 		case *replication.TableMapEvent:
 			e.Flags |= TM_REFERRED_FK_DB_F
 
 			binary.LittleEndian.PutUint16(event.RawData[bm.rowsEventFlagsOffset:], e.Flags)
 			// modify checksum
-			ModifyChecksum(event)
+			bm.ModifyChecksum(event)
 		case *replication.RowsEvent:
 			e.Flags |= TM_REFERRED_FK_DB_F
 			binary.LittleEndian.PutUint16(event.RawData[bm.rowsEventFlagsOffset:], e.Flags)
 			// modify checksum
-			ModifyChecksum(event)
+			bm.ModifyChecksum(event)
 		default:
 		}
 		n, err := bm.WriterAt.WriteAt(event.RawData, int64(event.Header.LogPos-event.Header.EventSize))
@@ -89,7 +95,10 @@ func (bm *BinlogModifier) Run() (err error) {
 	return parser.ParseReader(bm.Reader, bm.OnEventFunc)
 }
 
-func ModifyChecksum(event *replication.BinlogEvent) {
+func (bm *BinlogModifier) ModifyChecksum(event *replication.BinlogEvent) {
+	if !bm.isModifyChecksum {
+		return
+	}
 	length := len(event.RawData)
 	checksum := crc32.ChecksumIEEE(event.RawData[:length-replication.BinlogChecksumLength])
 	binary.LittleEndian.PutUint32(event.RawData[length-replication.BinlogChecksumLength:], checksum)
